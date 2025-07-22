@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Delete,
   Post,
   Body,
   Param,
@@ -50,6 +51,15 @@ export class AuthController {
       throw new NotFoundException('User not found');
     }
     return user;
+  }
+
+  @Delete(':id')
+  async deleteLog(@Param('id') id: string) {
+    const result = await this.authLogService.deleteLogById(id);
+    if (!result.deleted) {
+      throw new NotFoundException(`Log with ID ${id} not found`);
+    }
+    return { message: 'Log deleted successfully' };
   }
 
   @Get('user/:username')
