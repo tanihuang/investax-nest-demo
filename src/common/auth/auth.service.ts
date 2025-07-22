@@ -9,11 +9,12 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Auth } from './auth.schema';
+import { Auth, AuthDocument } from './auth.schema';
 import { CreateUserDto } from './dto/createUser.dto';
 import { AuthCredentialsDto } from './dto/authCredentials.dto';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { AuthLogService } from './authLog.service';
 
 @Injectable()
 export class AuthService {
@@ -21,23 +22,52 @@ export class AuthService {
 
   constructor(
     @InjectModel(Auth.name)
-    private readonly authModel: Model<Auth>,
+    private readonly authModel: Model<AuthDocument>,
     private readonly jwtService: JwtService,
+    private readonly authLogService: AuthLogService,
   ) {}
 
-  async signUp(createUserDto: CreateUserDto): Promise<Auth> {
-    this.logger.error('signUp: ', createUserDto);
-    return this.createUser(createUserDto);
+  private async _logUserAction(params: {
+    user: AuthDocument;
+    action: 'login' | 'logout';
+    tokenName: string;
+  }) {
+    const { user, action, tokenName } = params;
+
+    const logData: any = {
+      userId: user.userId,
+      username: user.username,
+      role: user.role,
+      action,
+      ipAddress: '0.0.0.0',
+      tokenName,
+    };
+
+    if (action === 'login') {
+      logData.loginTime = new Date();
+    } else {
+      logData.logoutTime = new Date();
+    }
+
+    await this.authLogService.createLog(logData);
   }
 
-  async createUser(createUserDto: CreateUserDto): Promise<Auth> {
+  async signUp(createUserDto: CreateUserDto): Promise<any> {
+    this.logger.log('signUp: ', createUserDto);
+    const savedUser = await this.createUser(createUserDto);
+
+    await this._logUserAction({
+      user: savedUser,
+      action: 'login',
+      tokenName: 'signup-auto',
+    });
+
+    return savedUser.toObject();
+  }
+
+  async createUser(createUserDto: CreateUserDto): Promise<AuthDocument> {
     const { email, password, username, role } = createUserDto;
 
-    // Hash the password
-    // const salt = await bcrypt.genSalt();
-    // const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Create a new user document
     const user = new this.authModel({
       email,
       password,
@@ -46,13 +76,11 @@ export class AuthService {
     });
 
     try {
-      console.log('User registered successfully');
       const savedUser = await user.save();
-      return savedUser.toObject();
+      return savedUser;
     } catch (error) {
-      // Handle duplicate username error
       if (error.code === 11000) {
-        throw new ConflictException('Username already exists');
+        throw new ConflictException('Username or email already exists');
       } else {
         this.logger.error('Error during user registration', error);
         throw new InternalServerErrorException('Registration failed');
@@ -62,29 +90,53 @@ export class AuthService {
 
   async signIn(
     authCredentialsDto: AuthCredentialsDto,
-  ): Promise<{ accessToken: string; user: Auth }> {
+  ): Promise<{ accessToken: string; user: any }> {
     const { email, password } = authCredentialsDto;
     const user = await this.authModel.findOne({ email });
+
     if (user && (await bcrypt.compare(password, user.password))) {
       const payload = { email, id: user.id };
       const accessToken: string = await this.jwtService.sign(payload);
+
+      await this._logUserAction({
+        user,
+        action: 'login',
+        tokenName: 'signin',
+      });
+
       return { accessToken, user: user.toObject() };
     } else {
       throw new UnauthorizedException('Please check your login credentials');
     }
   }
 
-  async findUserById(id: string): Promise<Auth | null> {
-    return this.authModel.findById(id).exec();
+  async logout(userId: string): Promise<void> {
+    const user = await this.authModel.findById(userId);
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    await this._logUserAction({
+      user,
+      action: 'logout',
+      tokenName: 'logout',
+    });
   }
 
-  async findUserByUsername(username: string): Promise<Auth> {
-    const user: any = await this.authModel.find({
+  async findUserById(id: string): Promise<any> {
+    const user = await this.authModel.findById(id).exec();
+    return user ? user.toObject() : null;
+  }
+
+  async findUserByUsername(username: string): Promise<any[]> {
+    const users = await this.authModel.find({
       username: { $regex: username, $options: 'i' },
     });
-    if (!user) {
+
+    if (!users || users.length === 0) {
       throw new HttpException('No users found', HttpStatus.NOT_FOUND);
     }
-    return user.map((user) => user.toObject());
+
+    return users.map((u) => u.toObject());
   }
 }

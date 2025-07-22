@@ -3,11 +3,14 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { AuthLogService } from './authLog.service';
 import { Auth, AuthSchema } from './auth.schema'; // ✅ 匯入 schema
 import { JwtModule } from '@nestjs/jwt';
+import { AuthLogModule } from './authLog.module';
 
 @Module({
   imports: [
+    AuthLogModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [`.env.${process.env.NODE_ENV || 'dev'}`],
@@ -30,7 +33,7 @@ import { JwtModule } from '@nestjs/jwt';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService], // ✅ 一定要註冊
+  providers: [AuthService],
   exports: [AuthService],
 })
 export class AuthModule {}

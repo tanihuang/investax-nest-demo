@@ -3,8 +3,10 @@ import { Document } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import * as bcrypt from 'bcrypt';
 
+export type AuthDocument = Auth & Document;
+
 @Schema({ collection: 'auth', timestamps: true })
-export class Auth extends Document {
+export class Auth {
   @Prop({ required: true, unique: true })
   username: string;
 
@@ -23,7 +25,7 @@ export class Auth extends Document {
 
 export const AuthSchema = SchemaFactory.createForClass(Auth);
 
-AuthSchema.pre<Auth>('save', async function (next) {
+AuthSchema.pre<AuthDocument>('save', async function (next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 10);
   next();
