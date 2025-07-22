@@ -1,0 +1,55 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main  # 在主分支推送時觸發
+  pull_request:
+    branches:
+      - main  # 在對主分支的拉取請求時觸發
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest  # 使用最新的 Ubuntu 環境
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3  # 檢出代碼
+
+    - name: Deploy to Production
+      env:
+        EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}  # 從 GitHub Secrets 中獲取 SSH 密鑰
+        HOST: ${{ secrets.HOST }}  # 目標主機地址
+        USER: ${{ secrets.USER }}  # SSH 使用者名稱
+        PROJECT: ${{ secrets.PROJECT_NAME }}  # 專案目錄
+      run: |
+        echo "Deploying to production..."
+
+        # 添加 SSH 密鑰
+        eval $(ssh-agent -s)
+        echo "$EC2_SSH_KEY" | tr -d '\r' | ssh-add -
+
+        # 透過 SSH 連接到伺服器並執行部署任務
+        ssh -o StrictHostKeyChecking=no $USER@$HOST << EOF
+          set -e  # 如果任何命令失敗，立即退出
+
+          # 加載 NVM 並設置 PATH
+          export NVM_DIR="\$HOME/.nvm"
+          [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"
+
+          # 進入專案目錄
+          cd $PROJECT
+
+          # 強制拉取最新的代碼
+          git fetch origin
+          git reset --hard origin/main
+
+          # 安裝依賴
+          npm ci --no-audit --no-fund --prefer-offline
+
+          # 構建應用
+          npm run build
+
+          # 重啟應用
+          npx pm2 restart $PROJECT || echo '重啟失敗'
+        EOF
